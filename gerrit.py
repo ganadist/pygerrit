@@ -27,19 +27,58 @@
 Very thin gerrit REST API wrapper for python
 
 Features:
-    Works with Python 3.6
+    Works with Python 2.7/3.6
     No Error Handlers
     No Docs
     No Testcases
     Just ONE file
 
 """
-
 import json
 import os
 import requests
+import sys
+
 from requests.utils import get_netrc_auth
-from requests.compat import urlparse
+from requests.compat import urlparse, cookielib
+
+if sys.version_info.major == 2:
+    from types import FunctionType
+    _builtin_super = super
+    # copy from
+    # https://github.com/PythonCharmers/python-future/blob/master/src/future/builtins/newsuper.py#L45
+    def super():
+        f = sys._getframe(1)
+        typ = object
+        type_or_obj = f.f_locals[f.f_code.co_varnames[0]]
+        try:
+            mro = type_or_obj.__mro__
+        except (AttributeError, RuntimeWarning):
+            mro = type_or_obj.__class__.__mro__
+
+        for typ in mro:
+            for meth in typ.__dict__.values():
+                try:
+                    while not isinstance(meth, FunctionType):
+                        if isinstance(meth, property):
+                            meth = meth.fget
+                        else:
+                            try:
+                                meth = meth.__func__
+                            except AttributeError:
+                                meth = meth.__get__(type_or_obj, typ)
+                except (AttributeError, TypeError):
+                    continue
+                if meth.func_code is f.f_code:
+                    break
+            else:
+                continue
+            break
+        else:
+            raise RuntimeError('super() called outside a method')
+
+        return _builtin_super(typ, type_or_obj)
+
 
 GERRIT_AUTH_SUFFIX = "/a"
 GERRIT_MAGIC_JSON_PREFIX = ")]}\'\n"
@@ -414,8 +453,7 @@ class Gerrit(EndpointBase):
         # load gitcookies
         gitcookies = os.path.expanduser('~/.gitcookies')
         if os.path.isfile(gitcookies):
-            from http.cookiejar import MozillaCookieJar
-            cookiejar = MozillaCookieJar()
+            cookiejar = cookielib.MozillaCookieJar()
             cookiejar.load(gitcookies, ignore_discard=True, ignore_expires=True)
             HAVE_AUTH = any(filter(lambda x: x.domain == hostname, cookiejar))
             if HAVE_AUTH:
