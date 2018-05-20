@@ -2,7 +2,7 @@
 
 # The MIT License
 #
-# Copyright 2018 YOUNG HO CHA <ganadist<at>gmail<dot>com>. All rights reserved.
+# Copyright 2018 YOUNG HO CHA <ganadist at gmail dot com>. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,9 @@ import json
 import os
 import requests
 from requests.utils import get_netrc_auth
+from requests.compat import urlparse
 
+GERRIT_AUTH_SUFFIX = "/a"
 GERRIT_MAGIC_JSON_PREFIX = ")]}\'\n"
 
 
@@ -406,7 +408,8 @@ class Gerrit(EndpointBase):
         self.session = requests.session()
         self.endpoint = ''
 
-        super().__init__(self, '')
+        hostname = urlparse(self.url).netloc
+        HAVE_AUTH = False
 
         # load gitcookies
         gitcookies = os.path.expanduser('~/.gitcookies')
@@ -414,13 +417,21 @@ class Gerrit(EndpointBase):
             from http.cookiejar import MozillaCookieJar
             cookiejar = MozillaCookieJar()
             cookiejar.load(gitcookies, ignore_discard=True, ignore_expires=True)
-            self.session.cookies = cookiejar
+            HAVE_AUTH = any(filter(lambda x: x.domain == hostname, cookiejar))
+            if HAVE_AUTH:
+                self.session.cookies = cookiejar
 
         # load netrc
         auth = get_netrc_auth(self.url)
         if auth:
             username, password = auth
             self.session.auth = requests.auth.HTTPBasicAuth(username, password)
+            HAVE_AUTH = True
+
+        if HAVE_AUTH and not self.url.endswith(GERRIT_AUTH_SUFFIX):
+            self.url += GERRIT_AUTH_SUFFIX
+
+        super().__init__(self, '')
 
 
     def projects(self):
@@ -437,7 +448,7 @@ class Gerrit(EndpointBase):
 
 
 if __name__ == '__main__':
-    #g = Gerrit('http://sel-gerrit2018.wrs.com/r/a')
+    #g = Gerrit('http://sel-gerrit2018.wrs.com/r')
     g = Gerrit('https://android-review.googlesource.com')
     p = g.projects()
     print(p.list())
