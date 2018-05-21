@@ -42,7 +42,8 @@ import sys
 from requests.utils import get_netrc_auth
 from requests.compat import urlparse, cookielib
 
-if sys.version_info.major == 2:
+PY2 = sys.version_info.major == 2
+if PY2:
     from types import FunctionType
     _builtin_super = super
     # copy from
@@ -127,143 +128,156 @@ class RestApi(object):
         return new_f
 
 
-class EndpointBase(object):
-    def __init__(self, parent, endpoint, *args):
+class EndpointBase(dict):
+    def __init__(self, parent, endpoint, arg = {}, key = 'id'):
+        if isinstance(arg, str):
+            arg = {key: arg}
+        elif PY2 and isinstance(arg, unicode):
+            arg = {key: arg}
+        super().__init__(arg)
         self.parent = parent
         self.url = parent.url
         self.session = parent.session
-        self.endpoint = parent.endpoint + endpoint.format(*args)
+        if arg:
+            endpoint = endpoint.format(arg[key])
+        self.endpoint = parent.endpoint + endpoint
 
     def make_url(self, suffix, args):
         if suffix:
             suffix = suffix.format(*args)
         return '{0}{1}{2}'.format(self.url, self.endpoint, suffix), self.session
 
+    def __str__(self):
+        return 'Endpoint({0}{1}) :{2}'.format(self.url, self.endpoint, dict.__str__(self))
+
 
 class Project(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#get-project
     """
-    def __init__(self, parent, id):
-        super().__init__(parent, '{0}/', id)
+    def __init__(self, parent, project):
+        super().__init__(parent, '/{0}', project)
 
-    @RestApi('description')
+    @RestApi()
+    def getInfo(self):
+        pass
+
+    @RestApi('/description')
     def getDescription(self):
         pass
 
-    @RestApi('description', method = 'PUT')
+    @RestApi('/description', method = 'PUT')
     def setDescription(self, description = '', commit_message = ''):
         pass
 
-    @RestApi('description', method = 'DELETE')
+    @RestApi('/description', method = 'DELETE')
     def deleteDescription(self):
         pass
 
-    @RestApi('parent')
+    @RestApi('/parent')
     def getParent(self):
         pass
 
-    @RestApi('parent', method = 'PUT')
+    @RestApi('/parent', method = 'PUT')
     def setParent(self, parent, **kwds):
         pass
 
-    @RestApi('HEAD')
+    @RestApi('/HEAD')
     def getHead(self):
         pass
 
-    @RestApi('HEAD', method = 'PUT')
+    @RestApi('/HEAD', method = 'PUT')
     def setHead(self, ref = ''):
         pass
 
-    @RestApi('statistics.git')
+    @RestApi('/statistics.git')
     def getStatistics(self):
         pass
 
-    @RestApi('config')
+    @RestApi('/config')
     def getConfig(self):
         pass
 
-    @RestApi('config', method = 'PUT')
+    @RestApi('/config', method = 'PUT')
     def setConfig(self, description = '', **kwds ):
         pass
 
-    @RestApi('gc', method = 'POST')
+    @RestApi('/gc', method = 'POST')
     def runGc(self, show_progress=False, aggressive=False, async=False):
         pass
 
-    @RestApi('ban', method = 'PUT')
+    @RestApi('/ban', method = 'PUT')
     def ban(self, commits = [], reason = ''):
         pass
 
-    @RestApi('access')
+    @RestApi('/access')
     def getAccess(self):
         pass
 
-    @RestApi('access', method = 'POST')
+    @RestApi('/access', method = 'POST')
     def setAccess(self, **kwds):
         pass
 
-    @RestApi('index', method = 'POST')
+    @RestApi('/index', method = 'POST')
     def reindex(self):
         pass
 
-    @RestApi('branches/')
+    @RestApi('/branches/')
     def listBranches(self):
         pass
 
-    @RestApi('branches/{0}')
+    @RestApi('/branches/{0}')
     def getBranch(self, name):
         pass
 
-    @RestApi('branches/{0}', method = 'PUT')
+    @RestApi('/branches/{0}', method = 'PUT')
     def createBranch(self, name, revision='HEAD'):
         pass
 
-    @RestApi('branches/{0}', method = 'DELETE')
+    @RestApi('/branches/{0}', method = 'DELETE')
     def deleteBranch(self, name):
         pass
 
-    @RestApi('branches:delete', method = 'POST')
+    @RestApi('/branches:delete', method = 'POST')
     def deleteBranches(self, branches=[]):
         pass
 
-    @RestApi('tags/')
+    @RestApi('/tags/')
     def listTags(self):
         pass
 
-    @RestApi('tags/{0}', method = 'PUT')
+    @RestApi('/tags/{0}', method = 'PUT')
     def createTag(self, name, revision='HEAD', **kwds):
         pass
 
-    @RestApi('tags/{0}')
+    @RestApi('/tags/{0}')
     def getTag(self, name):
         pass
 
-    @RestApi('tags/{0}', method = 'DELETE')
+    @RestApi('/tags/{0}', method = 'DELETE')
     def deleteTag(self, name):
         pass
 
-    @RestApi('tags:delete', method = 'POST')
+    @RestApi('/tags:delete', method = 'POST')
     def deleteTags(self, tags = []):
         pass
-
 
 class Projects(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#list-projects
     """
     def __init__(self, parent):
-        super().__init__(parent, '/projects/')
+        super().__init__(parent, '/projects')
 
-    @RestApi()
+    @RestApi('/')
+    def _list(self, **kwds):
+        pass
+
     def list(self, **kwds):
-        pass
+        for project in self._list(**kwds).values():
+            yield Project(self, project)
 
-    @RestApi('{0}')
-    def get(self, name):
-        pass
-
-    @RestApi('{0}', method = 'PUT')
+    @RestApi('/{0}', method = 'PUT')
     def create(self, name, parent = '', description = '',
             permissions_only = False, create_empty_commit = False ):
         pass
@@ -272,55 +286,62 @@ class Projects(EndpointBase):
         id = id.replace('/', '%2F')
         return Project(self, id)
 
+    def __iter__(self):
+        return self.list()
+
 
 class Account(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-accounts.html#get-detail
     """
     def __init__(self, parent, id):
-        super().__init__(parent, '{0}/', id)
+        super().__init__(parent, '/{0}', id, key = '_account_id')
 
-    @RestApi('detail')
+    @RestApi()
+    def getInfo(self):
+        pass
+
+    @RestApi('/detail')
     def getDetail(self):
         pass
 
-    @RestApi('name')
+    @RestApi('/name')
     def getName(self):
         pass
 
-    @RestApi('name', method = 'PUT')
+    @RestApi('/name', method = 'PUT')
     def setName(self, **kwds):
         pass
 
-    @RestApi('name', method = 'DELETE')
+    @RestApi('/name', method = 'DELETE')
     def delete(self):
         pass
 
-    @RestApi('status')
+    @RestApi('/status')
     def getStatus(self):
         pass
 
-    @RestApi('status', method = 'PUT')
+    @RestApi('/status', method = 'PUT')
     def setStatus(self, **kwds):
         pass
 
-    @RestApi('username')
+    @RestApi('/username')
     def getUsername(self):
         pass
         
-    @RestApi('username', method = 'PUT')
+    @RestApi('/username', method = 'PUT')
     def setUsername(self, **kwds):
         pass
  
-    @RestApi('active')
+    @RestApi('/active')
     def getActive(self):
         pass
 
-    @RestApi('active', method = 'PUT')
+    @RestApi('/active', method = 'PUT')
     def setActive(self):
         pass
 
-    @RestApi('active', method = 'DELETE')
+    @RestApi('/active', method = 'DELETE')
     def deleteActive(self):
         pass
 
@@ -330,89 +351,104 @@ class Accounts(EndpointBase):
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-accounts.html#query-account
     """
     def __init__(self, parent):
-        super().__init__(parent, '/accounts/')
+        super().__init__(parent, '/accounts')
 
-    @RestApi('{0}')
-    def get(self, account):
+    @RestApi('/')
+    def _query(self, q = '', **kwds):
         pass
 
-    @RestApi('{0}', method = 'PUT')
+    def query(self, q, **kwds):
+        for item in self._query(q = q, **kwds):
+            yield Account(self, item)
+
+    @RestApi('/{0}', method = 'PUT')
     def create(self, account, name = '', email = '', groups = []):
         pass
 
     def __getitem__(self, id):
         return Account(self, id)
 
+
 class Revision(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#revision-endpoints
     """
     def __init__(self, parent, revision):
-        super().__init__(parent, 'revision/{0}/', revision)
+        super().__init__(parent, '/revisions/{0}', revision)
 
-    @RestApi('commit')
+    @RestApi('/commit')
     def getCommit(self):
         pass
 
-    @RestApi('description')
+    @RestApi('/description')
     def getDescription(self):
         pass
 
-    @RestApi('description', method = 'PUT')
+    @RestApi('/description', method = 'PUT')
     def setDescription(self, description = ''):
         pass
 
-    @RestApi('review')
+    @RestApi('/review')
     def getReview(self):
         pass
 
-    @RestApi('review', method = 'POST')
+    @RestApi('/review', method = 'POST')
     def setReview(self, labels = {}, **kwds):
         pass
 
-    @RestApi('related')
+    @RestApi('/related')
     def getRelated(self):
         pass
 
-    @RestApi('submit', method = 'POST')
+    @RestApi('/submit', method = 'POST')
     def submit(self):
         pass
 
-    @RestApi('rebase', method = 'POST')
+    @RestApi('/rebase', method = 'POST')
     def rebase(self):
         pass
 
 
 class Change(EndpointBase):
     def __init__(self, parent, name):
-        super().__init__(parent, '{0}/', name)
+        super().__init__(parent, '/{0}', name)
 
-    @RestApi('detail')
+    @RestApi('')
+    def getInfo(self):
+        pass
+
+    @RestApi('/detail')
     def getDetail(self):
         pass
 
-    @RestApi('message', method = 'PUT')
+    @RestApi('/message', method = 'PUT')
     def setMessage(self, **kwds):
         pass
 
-    @RestApi('topic')
+    @RestApi('/topic')
     def getTopic(self):
         pass
 
-    @RestApi('topic', method = 'PUT')
+    @RestApi('/topic', method = 'PUT')
     def setTopic(self, topic = ''):
         pass
 
-    @RestApi('topic', method = 'DELETE')
+    @RestApi('/topic', method = 'DELETE')
     def deleteTopic(self):
         pass
 
-    @RestApi('submit', method = 'POST')
+    @RestApi('/submit', method = 'POST')
     def submit(self, **kwds):
         pass
 
-    def _getitem__(self, revision):
-        return Revision(self, revision)
+    def current(self):
+        rev = self.get('current_revision')
+        if rev:
+            return Revision(self, rev)
+
+    def revisions(self):
+        for rev in self.get('revisions', []):
+            yield Revision(self, rev)
 
 
 class Changes(EndpointBase):
@@ -420,24 +456,27 @@ class Changes(EndpointBase):
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#change-endpoints
     """
     def __init__(self, parent):
-        super().__init__(parent, '/changes/')
+        super().__init__(parent, '/changes')
 
-    @RestApi()
-    def query(self, q = '', **kwds):
+    @RestApi('/')
+    def _query(self, q = '', **kwds):
         pass
 
-    @RestApi('{0}')
-    def get(self, name):
-        pass
+    def query(self, q, **kwds):
+        o = kwds.setdefault('o', [])
+        o += ['CURRENT_REVISION', 'ALL_REVISIONS']
+
+        for item in self._query(q = q, **kwds):
+            yield Change(self, item)
 
     def __getitem__(self, id):
         return Change(self, id)
 
 class Accesses(EndpointBase):
     def __init__(self, parent):
-        super().__init__(parent, '/access/')
+        super().__init__(parent, '/access')
 
-    @RestApi('?project={0}')
+    @RestApi('/?project={0}')
     def list(self, project):
         pass
 
@@ -471,25 +510,23 @@ class Gerrit(EndpointBase):
 
         super().__init__(self, '')
 
+        self.projects = Projects(self)
+        self.changes = Changes(self)
+        self.accounts = Accounts(self)
+        self.accesses = Accesses(self)
 
-    def projects(self):
-        return Projects(self)
-
-    def changes(self):
-        return Changes(self)
-
-    def accounts(self):
-        return Accounts(self)
-
-    def accesses(self):
-        return Accesses(self)
+    def query(self, q, **kwds):
+        return self.changes.query(q, **kwds)
 
 
 if __name__ == '__main__':
     #g = Gerrit('http://sel-gerrit2018.wrs.com/r')
     g = Gerrit('https://android-review.googlesource.com')
-    p = g.projects()
-    print(p.list())
-    print(p['platform/manifest'].listBranches())
-    c = g.changes()
-    print(c.query(q = 'is:open owner:ganadist@gmail.com'))
+
+    for project in g.projects:
+        print(project)
+    print(g.projects['platform/manifest'].listBranches())
+
+    for item in g.query('is:open owner:ganadist@gmail.com'):
+        print(item)
+        print(item.current().getCommit())
