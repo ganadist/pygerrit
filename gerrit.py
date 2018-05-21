@@ -475,11 +475,11 @@ class Change(EndpointBase):
     def current(self):
         rev = self.get('current_revision')
         if rev:
-            return Revision(self, rev)
+            return Revision(self, {'id': rev})
 
     def revisions(self):
         for rev in self.get('revisions', []):
-            yield Revision(self, rev)
+            yield Revision(self, {'id': rev})
 
 
 class Changes(EndpointBase):
@@ -568,5 +568,9 @@ if __name__ == '__main__':
         print(item)
 
     print()
-    print(g.changes[55205])
+    change = g.changes[175690]
+    print(change)
+    print(change.current().getCommit())
+    for rev in change.revisions():
+        print(rev.getCommit())
     print(g.accounts['ganadist@gmail.com'])
