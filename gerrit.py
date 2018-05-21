@@ -40,7 +40,7 @@ import requests
 import sys
 
 from requests.utils import get_netrc_auth
-from requests.compat import urlparse, cookielib
+from requests.compat import urlparse, cookielib, quote_plus
 
 PY2 = sys.version_info.major == 2
 if PY2:
@@ -130,11 +130,8 @@ class RestApi(object):
 
 class EndpointBase(dict):
     def __init__(self, parent, endpoint, arg = {}, key = 'id'):
-        if isinstance(arg, str):
-            arg = {key: arg}
-        elif PY2 and isinstance(arg, unicode):
-            arg = {key: arg}
         super().__init__(arg)
+
         self.parent = parent
         self.url = parent.url
         self.session = parent.session
@@ -151,16 +148,40 @@ class EndpointBase(dict):
         return 'Endpoint({0}{1}) :{2}'.format(self.url, self.endpoint, dict.__str__(self))
 
 
+class ProjectBranch(EndpointBase):
+    def __init__(self, parent, branch):
+        # XXX
+        ref = branch['ref']
+        assert ref.startswith('refs/heads/')
+        branch['id'] = ref[len('refs/heads/'):]
+
+        super().__init__(parent, '/branches/{0}', branch)
+
+    @RestApi(method = 'DELETE')
+    def delete(self):
+        pass
+
+
+class ProjectTag(EndpointBase):
+    def __init__(self, parent, tag):
+        # XXX
+        ref = tag['ref']
+        assert ref.startswith('refs/tags/')
+        tag['id'] = ref[len('refs/tags/'):]
+
+        super().__init__(parent, '/tags/{0}', tag)
+
+    @RestApi(method = 'DELETE')
+    def delete(self):
+        pass
+
+
 class Project(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#get-project
     """
     def __init__(self, parent, project):
         super().__init__(parent, '/{0}', project)
-
-    @RestApi()
-    def getInfo(self):
-        pass
 
     @RestApi('/description')
     def getDescription(self):
@@ -223,19 +244,24 @@ class Project(EndpointBase):
         pass
 
     @RestApi('/branches/')
-    def listBranches(self):
+    def listBranches(self, **kwds):
         pass
 
     @RestApi('/branches/{0}')
     def getBranch(self, name):
         pass
 
+    def branch(self, name):
+        return ProjectBranch(self, self.getBranch(name))
+
+    def branches(self, **kwds):
+        for br in self.listBranches(**kwds):
+            ref = br['ref']
+            if ref.startswith('refs/heads/'):
+                yield ProjectBranch(self, br)
+
     @RestApi('/branches/{0}', method = 'PUT')
     def createBranch(self, name, revision='HEAD'):
-        pass
-
-    @RestApi('/branches/{0}', method = 'DELETE')
-    def deleteBranch(self, name):
         pass
 
     @RestApi('/branches:delete', method = 'POST')
@@ -243,19 +269,24 @@ class Project(EndpointBase):
         pass
 
     @RestApi('/tags/')
-    def listTags(self):
-        pass
-
-    @RestApi('/tags/{0}', method = 'PUT')
-    def createTag(self, name, revision='HEAD', **kwds):
+    def listTags(self, **kwds):
         pass
 
     @RestApi('/tags/{0}')
     def getTag(self, name):
         pass
 
-    @RestApi('/tags/{0}', method = 'DELETE')
-    def deleteTag(self, name):
+    def tag(self, name):
+        return ProjectTag(self, self.getTag(name))
+
+    def tags(self, **kwds):
+        for tag in self.listTags(**kwds):
+            ref = tag['ref']
+            if ref.startswith('refs/tags/'):
+                yield ProjectTag(self, tag)
+
+    @RestApi('/tags/{0}', method = 'PUT')
+    def createTag(self, name, revision='HEAD', **kwds):
         pass
 
     @RestApi('/tags:delete', method = 'POST')
@@ -282,9 +313,13 @@ class Projects(EndpointBase):
             permissions_only = False, create_empty_commit = False ):
         pass
 
-    def __getitem__(self, id):
-        id = id.replace('/', '%2F')
-        return Project(self, id)
+    @RestApi('/{0}')
+    def getProject(self, name):
+        pass
+
+    def __getitem__(self, name):
+        name = quote_plus(name)
+        return Project(self, self.getProject(name))
 
     def __iter__(self):
         return self.list()
@@ -296,10 +331,6 @@ class Account(EndpointBase):
     """
     def __init__(self, parent, id):
         super().__init__(parent, '/{0}', id, key = '_account_id')
-
-    @RestApi()
-    def getInfo(self):
-        pass
 
     @RestApi('/detail')
     def getDetail(self):
@@ -365,8 +396,12 @@ class Accounts(EndpointBase):
     def create(self, account, name = '', email = '', groups = []):
         pass
 
-    def __getitem__(self, id):
-        return Account(self, id)
+    @RestApi('/{0}')
+    def getAccount(self, name):
+        pass
+
+    def __getitem__(self, name):
+        return Account(self, self.getAccount(name))
 
 
 class Revision(EndpointBase):
@@ -412,10 +447,6 @@ class Revision(EndpointBase):
 class Change(EndpointBase):
     def __init__(self, parent, name):
         super().__init__(parent, '/{0}', name)
-
-    @RestApi('')
-    def getInfo(self):
-        pass
 
     @RestApi('/detail')
     def getDetail(self):
@@ -469,8 +500,13 @@ class Changes(EndpointBase):
         for item in self._query(q = q, **kwds):
             yield Change(self, item)
 
+    @RestApi('/{0}')
+    def getChange(self, change, **kwds):
+        pass
+
     def __getitem__(self, id):
-        return Change(self, id)
+        change = self.getChange(id, o = ['CURRENT_REVISION', 'ALL_REVISIONS'])
+        return Change(self, change)
 
 class Accesses(EndpointBase):
     def __init__(self, parent):
@@ -525,8 +561,12 @@ if __name__ == '__main__':
 
     for project in g.projects:
         print(project)
-    print(g.projects['platform/manifest'].listBranches())
+    for branch in g.projects['platform/manifest'].branches():
+        print(branch)
 
     for item in g.query('is:open owner:ganadist@gmail.com'):
         print(item)
-        print(item.current().getCommit())
+
+    print()
+    print(g.changes[55205])
+    print(g.accounts['ganadist@gmail.com'])
