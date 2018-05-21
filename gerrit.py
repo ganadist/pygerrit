@@ -293,6 +293,11 @@ class Project(EndpointBase):
     def deleteTags(self, tags = []):
         pass
 
+    @RestApi('/delete-project~delete', method = 'POST')
+    def delete(self, preserve = False, force = False):
+        pass
+
+
 class Projects(EndpointBase):
     """
     Wrapper of https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#list-projects
@@ -516,6 +521,45 @@ class Accesses(EndpointBase):
     def list(self, project):
         pass
 
+
+class ImportedProject(EndpointBase):
+    def __init__(self, parent, project):
+        super().__init__(parent, '/{0}', project, key = 'name')
+
+    @RestApi('/resume', method = 'PUT')
+    def resume(self, **kwds):
+        pass
+
+    @RestApi(method = 'DELETE')
+    def complete(self):
+        pass
+
+
+class Importer(EndpointBase):
+    def __init__(self, parent):
+        super().__init__(parent, '/config/server/importer~projects')
+
+    @RestApi('/')
+    def _list(self, **kwds):
+        pass
+
+    @RestApi('/{0}', method = 'PUT')
+    def start(self, **kwds):
+        pass
+
+    @RestApi('/{0}')
+    def getProject(self, name):
+        pass
+
+    def __getitem__(self, name):
+        name = quote_plus(name)
+        return ImportedProject(self, self.getProject(name))
+
+    def __iter__(self):
+        for name, item in self._list().items():
+            yield ImportedProject(self, item)
+
+
 class Gerrit(EndpointBase):
     def __init__(self, url):
         self.url = url.rstrip('/')
@@ -550,6 +594,7 @@ class Gerrit(EndpointBase):
         self.changes = Changes(self)
         self.accounts = Accounts(self)
         self.accesses = Accesses(self)
+        self.importer = Importer(self)
 
     def query(self, q, **kwds):
         return self.changes.query(q, **kwds)
